@@ -1,0 +1,8 @@
+# 03_TCGA_validation.R
+# Fixed cervical SCC model applied to supplied TCGA RPPA cohorts; no refitting.
+suppressPackageStartupMessages({library(readr);library(dplyr)})
+OUT<-"results/validation/TCGA";dir.create(OUT,recursive=TRUE,showWarnings=FALSE)
+MODEL_FILE<-"results/classifier/five_marker/five_marker_elastic_net_model.rds";BASE<-Sys.getenv("TCGA_VALIDATION_DIR","data/external/TCGA_validation")
+COHORTS<-c("TCGA-HNSC","TCGA-LUSC","TCGA-ESCA","TCGA-CESC");MARKERS<-c("ZAP-70","EVI1","EPPK1","ANNEXIN1","CD171")
+if(!file.exists(MODEL_FILE))stop("Missing fitted model: ",MODEL_FILE);obj<-readRDS(MODEL_FILE)
+for(cohort in COHORTS){f<-file.path(BASE,paste0(cohort,"_RPPA.csv"));if(!file.exists(f)){message("Skipping ",cohort," (input absent)");next};d<-read_csv(f,show_col_types=FALSE);id<-intersect(c("Patient","Sample","sample_id"),names(d))[1];if(is.na(id))stop(cohort,": no sample ID");names(d)[names(d)==id]<-"Patient";if(!all(MARKERS%in%names(d)))stop(cohort,": missing markers");z<-as.matrix(d[,MARKERS]);z<-sweep(z,2,obj$scale_center,"-");z<-sweep(z,2,obj$scale_scale,"/");ok<-complete.cases(z);pr<-rep(NA_real_,nrow(d));pr[ok]<-as.numeric(predict(obj$model,newx=z[ok,,drop=FALSE],type="response"));o<-tibble(Patient=d$Patient,cohort=cohort,keratinizing_probability=pr,molecular_state=case_when(pr<=.35~"Nonkeratinizing-like",pr>=.65~"Keratinizing-like",TRUE~"Indeterminate"));if("pathology_group"%in%names(d))o<-o%>%mutate(pathology_group=d$pathology_group,label=case_when(pathology_group%in%c("SCC-K","Keratinizing")~1,pathology_group%in%c("SCC-NK","Nonkeratinizing")~0,TRUE~NA_real_));write_csv(o,file.path(OUT,paste0(cohort,"_five_marker_predictions.csv")))}
